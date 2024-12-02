@@ -1,0 +1,66 @@
+---
+title: "Distribution of Lakes Across Iowa Counties"
+author: "Huy Nguyen, Nhat Le"
+date: "2024-12-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Research Topic
+Understanding the distribution of lakes across the 99 Iowa counties and examining potential correlations with agricultural land areas.
+
+# Team Members
+1. Huu Huy Nguyen
+
+2. Nhat Le
+
+# Introduction 
+This project investigates the spatial distribution of 913 lakes in Iowa and explores the relationship between lake density and agricultural land in each county.
+
+# Data Description
+The project utilizes:
+
+	1.	Lake Data: From data.iowa.gov, providing details about 913 lakes.
+	
+	2.	County Boundary Data: From the tigris library, offering spatial geometries and areas of Iowa counties.
+	
+	3.	Agricultural Land Data: Potentially sourced from the USDA for information on agricultural land areas by county.
+
+# Methodology
+
+### Libraries to be used
+
+```{r}
+library(tigris)
+library(dplyr)
+library(stringr)
+library(tidyr)
+library(sf)
+```
+
+### Data Preparation
+
+```{r}
+counties <- counties(state = "IA", cb = TRUE, class = "sf")
+counties_area <- counties %>% mutate(county_area = st_area(geometry))
+counties_area <- counties_area %>% select(NAME, county_area) %>% st_set_geometry(NULL)
+```
+
+```{r}
+lakes <- read.csv('https://data.iowa.gov/resource/2mmi-txzx.csv')
+```
+
+For this part, we may collect a dataset about agricultural land in Iowa counties, provided by U.S. Department of Agriculture. We can also explore some spatial visualization of the data.
+
+### Data Cleaning and Transformation
+1. Standardize the names of counties between datasets.
+	
+2. Convert spatial data into sf format for analysis.
+
+3. Ensure CRS (Coordinate Reference System) alignment for spatial operations.
+
+### Data Visualization
+Utilize R packages to visualize the spatial patterns of lake distribution.
