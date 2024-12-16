@@ -1,0 +1,316 @@
+---
+title: "Distribution of Lakes Across Iowa Counties"
+author: "Huy Nguyen, Nhat Le"
+date: "2024-12-14"
+output: github_document
+---
+
+```{r}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message=FALSE)
+```
+
+# Introduction
+
+Iowa is famous for its extensive agricultural landscape and its numerous lakes. Understanding the spatial distribution of these water bodies and their relationship to agricultural land use can inform environmental policy, resource management, and sustainable farming practices. This project aims to explore how the density of lakes correlates with agricultural areas across Iowa’s 99 counties. The analysis begins with a description of the data, followed by in-depth exploratory work, multiple analytical approaches, careful skepticism regarding findings, and ultimately, the presentation of clear conclusions and suggestions for future work.
+
+# Data
+We use three key datasets:
+
+	1.	Lake Data (913 Lakes): This dataset, sourced from data.iowa.gov, provides geographic coordinates and county affiliations of lakes in Iowa. 
+	
+	2.	County Boundary Data: Retrieved using the tigris R package, this spatial dataset includes geometries and areas for Iowa’s 99 counties.
+	
+	3.	Agricultural Land Data: Obtained from the USDA, this dataset provides insights into agricultural land areas, measured in acres, by county.
+
+Each dataset has been cleaned and transformed to align county names, calculate county and lake areas, and merge agricultural data for subsequent correlation analyses.
+
+```{r, message=FALSE}
+library(tigris)
+library(dplyr)
+library(sf)
+library(ggplot2)
+library(leaflet)
+library(stringr)
+library(tidyr)
+library(knitr)
+
+```
+
+```{r}
+# data loading
+counties <- counties(state = "IA", cb = TRUE, class = "sf") 
+lakes <- read.csv('https://data.iowa.gov/resource/2mmi-txzx.csv')
+agland_acres <- read.csv('./data/Cropland_Acres.csv')
+```
+
+# Main Analysis - Curiosity
+To understand the intricate interplay between agriculture and natural water distribution, multiple approaches were tried. These included:
+
+1. Spatial Mapping: Creating choropleth maps to visualize lake density and proportion of agricultural land per county.
+
+2. Area Calculations: Computing county areas and normalizing lake and cropland data by total county area.
+
+3. Statistical Correlations: Running correlation tests (Pearson’s r) to explore the relationship between lake area proportions and cropland proportions.
+
+4. Iterative Refinement: Testing multiple spatial joins, experimenting with different geographic projections, and recalculating area metrics to ensure consistency and accuracy.
+
+In the pursuit of uncovering meaningful patterns, many trial mappings and exploratory plots were generated. Only the most illustrative and informative outputs are included here, representing the culmination of extensive preliminary work.
+
+# Main Analysis - Scepticism
+We maintained a critical lens throughout:
+
+1. Verifying Unintuitive Patterns: If a county with known lakes showed low lake area, we rechecked geometries, projections, and data joins.
+
+2. Comparing Projections: Ensured CRS was appropriate and consistent for area calculations.
+
+3. Double-Checking Data Merges: Confirmed that county names in all datasets matched properly to avoid misalignments.
+
+This skepticism increased the reliability and credibility of the final findings.
+
+# Main Analysis - Organization
+The analysis is structured to guide the reader clearly:
+
+1. Data Acquisition & Cleaning: Load and harmonize datasets.
+
+2. Spatial & Statistical Analysis: Map spatial distributions, compute proportions, test correlations.
+
+3. Refinement & Presentation: Present the most pertinent visualizations, results, and narratives.
+
+4. Conclusions & Future Directions: Summarize key takeaways and propose next steps.
+
+Logical progression, clear headings, and careful selection of included results ensure a coherent narrative.
+
+# Incorporating Code Analyses - Visualization
+
+Below, we include the code segments from the initial R Markdown, adapted for this README. This code shows how we processed counties, lakes, and agricultural data, calculated areas, and prepared the data for visualization and correlation testing.
+
+## County Areas
+
+```{r}
+counties_area <- counties %>%
+  mutate(county_area_sqm = st_area(geometry)) %>%
+  mutate(county_area_acres = as.numeric(county_area_sqm) * 0.000247105) %>%
+  select(NAME, county_area_acres) %>%
+  st_set_geometry(NULL)
+```
+
+## Lake Data Preparation
+
+```{r}
+lakes_sf <- st_as_sf(lakes, wkt = "the_geom", crs = 4326)
+lakes_sf <- st_make_valid(lakes_sf)
+
+lakes_sf <- lakes_sf %>%
+  mutate(lake_area_sqm = st_area(the_geom)) %>%
+  mutate(lake_area_acres = as.numeric(lake_area_sqm) * 0.000247105) 
+
+lakes_summary <- lakes_sf %>%
+  group_by(county) %>%
+  summarize(total_lake_area_acres = sum(lake_area_acres, na.rm = TRUE)) %>%
+  ungroup() %>%
+  full_join(counties_area, by = c("county" = "NAME")) %>%
+  mutate(prop_lake = total_lake_area_acres / county_area_acres) %>%
+  st_set_geometry(NULL)
+```
+
+## Agricultural Data Preparation
+
+```{r}
+agland_acres$County <- str_to_title(str_to_lower(agland_acres$County))
+
+ag_percent <- agland_acres %>%
+  select(County, Value) %>%
+  arrange(County)
+
+# Fix county name mismatch
+ag_percent$County[71] <- "O'Brien"
+
+ag_percent$Value <- as.numeric(gsub(",", "", ag_percent$Value))
+
+ag_percent <- ag_percent %>%
+  full_join(counties_area, by = c("County" = "NAME")) %>%
+  mutate(prop_crop = Value / county_area_acres) %>%
+  rename(crop_area_acres = Value) %>%
+  select(County, crop_area_acres, county_area_acres, prop_crop)
+```
+
+## Merging Datasets
+```{r}
+analysis_data <- lakes_summary %>%
+  full_join(ag_percent, by = c("county" = "County"))
+
+counties_data <- counties %>%
+  left_join(analysis_data, by = c("NAME" = "county"))
+```
+
+## Correlation Test
+```{r}
+analysis_data_clean <- analysis_data %>%
+  filter(!is.na(prop_lake) & !is.na(prop_crop))
+
+correlation_result <- cor.test(
+  analysis_data_clean$prop_crop,
+  analysis_data_clean$prop_lake,
+  method = "pearson"
+)
+
+# Format the results for readability
+cat("----- Correlation Results -----\n")
+cat("Test: Pearson's Product-Moment Correlation\n")
+cat("Correlation Coefficient (r):", round(correlation_result$estimate, 3), "\n")
+cat("p-value:", format(correlation_result$p.value, scientific = TRUE, digits = 3), "\n")
+cat("95% Confidence Interval: [", 
+    round(correlation_result$conf.int[1], 3), ", ", 
+    round(correlation_result$conf.int[2], 3), "]\n")
+cat("--------------------------------\n")
+```
+
+## Visualization
+
+```{r, echo=FALSE}
+# Ensure the data is in the correct CRS (WGS84) for leaflet
+counties_data <- st_transform(counties_data, crs = 4326)
+
+# Define color palettes for cropland and lake proportions
+cropland_pal <- colorNumeric(
+  palette = "YlGn",
+  domain = counties_data$prop_crop,
+  na.color = "transparent"
+)
+
+# Updated lake color palette with a bright, high-contrast gradient (light blue to dark blue)
+lake_pal <- colorNumeric(
+  palette = c("#deebf7", "#9ecae1", "#3182bd"), # Light blue to dark blue
+  domain = counties_data$prop_lake,
+  na.color = "transparent"
+)
+
+# Create labels for cropland proportion
+counties_data <- counties_data %>%
+  mutate(
+    cropland_label = paste0(
+      "<strong>County: </strong>", NAME, "<br>",
+      "<strong>Proportion of Cropland: </strong>", 
+      scales::percent(prop_crop, accuracy = 0.1)
+    ) %>% lapply(htmltools::HTML),
+    lake_label = paste0(
+      "<strong>County: </strong>", NAME, "<br>",
+      "<strong>Proportion of Lake Area: </strong>", 
+      scales::percent(prop_lake, accuracy = 0.1)
+    ) %>% lapply(htmltools::HTML)
+  )
+```
+
+### Lake Distribution
+```{r, echo=FALSE}
+lake_map <- leaflet(data = counties_data) %>%
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  addPolygons(
+    fillColor = ~lake_pal(prop_lake),
+    weight = 1,
+    opacity = 1,
+    color = "white",
+    dashArray = "3",
+    fillOpacity = 0.7,
+    highlight = highlightOptions(
+      weight = 2,
+      color = "#666",
+      dashArray = "",
+      fillOpacity = 0.7,
+      bringToFront = TRUE
+    ),
+    label = ~lake_label,
+    labelOptions = labelOptions(
+      style = list("font-weight" = "normal", padding = "3px 8px"),
+      textsize = "15px",
+      direction = "auto"
+    )
+  ) %>%
+  addLegend(
+    pal = lake_pal,
+    values = ~prop_lake,
+    opacity = 0.7,
+    title = "Proportion of Lake Area",
+    position = "bottomright",
+    labFormat = labelFormat(suffix = "%", transform = function(x) x * 100)
+  )
+
+# Display the Lake Proportion Map
+lake_map
+```
+
+### Cropland Distribution Map
+
+```{r, echo=FALSE}
+# Create the Cropland Proportion Map
+cropland_map <- leaflet(data = counties_data) %>%
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  addPolygons(
+    fillColor = ~cropland_pal(prop_crop),
+    weight = 1,
+    opacity = 1,
+    color = "white",
+    dashArray = "3",
+    fillOpacity = 0.7,
+    highlight = highlightOptions(
+      weight = 2,
+      color = "#666",
+      dashArray = "",
+      fillOpacity = 0.7,
+      bringToFront = TRUE
+    ),
+    label = ~cropland_label,
+    labelOptions = labelOptions(
+      style = list("font-weight" = "normal", padding = "3px 8px"),
+      textsize = "15px",
+      direction = "auto"
+    )
+  ) %>%
+  addLegend(
+    pal = cropland_pal,
+    values = ~prop_crop,
+    opacity = 0.7,
+    title = "Proportion of Cropland",
+    position = "bottomright",
+    labFormat = labelFormat(suffix = "%", transform = function(x) x * 100)
+  )
+
+# Display the Cropland Proportion Map
+cropland_map
+```
+
+
+
+### Scatterplot Between Lake Distribution - Agricultural Land
+```{r, echo=FALSE}
+ggplot(data = analysis_data_clean, aes(x = prop_crop, y = prop_lake)) +
+  geom_point(color = "blue", size = 3, alpha = 0.7) +
+  geom_smooth(method = "lm", se = TRUE, color = "red", linetype = "dashed") +
+  labs(
+    title = "Scatterplot: Proportion of Lake vs. Proportion of Cropland",
+    x = "Proportion of Cropland",
+    y = "Proportion of Lake Area",
+    caption = "Data Source: Iowa Lakes & USDA Cropland Data"
+  ) +
+  theme_minimal()
+```
+
+### Table
+
+```{r}
+analysis_summary <- analysis_data_clean %>%
+  arrange(desc(prop_lake)) %>%
+  head(10) %>%
+  mutate(
+    lake_percent = scales::percent(prop_lake, accuracy = 0.1),
+    crop_percent = scales::percent(prop_crop, accuracy = 0.1)
+  ) %>%
+  select(County = county, `Lake Area %` = lake_percent, `Cropland %` = crop_percent)
+
+kable(analysis_summary, caption = "Top 10 Counties by Lake Proportion") 
+```
+
+# Conclusion
+Our analysis suggests no strong linear correlation between the proportion of lake areas and cropland areas in Iowa counties. Some counties with extensive agricultural lands do not boast notable lake coverage, indicating that lake distribution can influence cropland distribution, but not too significant.
+
+Future studies might delve into historical land use changes, soil composition, climate influences, or environmental policies. These additional variables could provide deeper insights into how agricultural practices and natural water bodies interact over time.
